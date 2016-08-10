@@ -1,0 +1,6 @@
+yestifico
+*.o
+*.a
+*.so
+core
+vgcore*
