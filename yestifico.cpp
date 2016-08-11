@@ -5,6 +5,7 @@
  *  DISTRIBUTED UNDER THE GNU GENERAL PUBLIC LICENSE (GPL) (see: LICENSE)
  */
 
+#include <openssl/hmac.h>
 #include "ircbot/bot.h"
 #include "urldecode2.h"
 
@@ -29,9 +30,12 @@ struct message
 {
 	std::string cmd;                     // HTTP/1.1 POST ...
 	std::string src;                     // github/travis/...
+	std::string sig;                     // github hmac
 	std::string event;                   // push/ping/...
 	size_t content_length;
 	Adoc doc;
+
+	bool validate(const std::string &content);
 
 	message(std::istream &in);
 };
@@ -68,8 +72,15 @@ message::message(std::istream &in)
 				event = header.second;
 				continue;
 
-			default:
+			case hash("x-hub-signature"):
+			{
+				const auto kv(split(header.second, "="));
+				if(kv.first != "sha1")
+					throw Assertive("Unsupported signature type");
+
+				sig = kv.second;
 				continue;
+			}
 		}
 	}
 
@@ -99,10 +110,35 @@ message::message(std::istream &in)
 		default:
 		case hash("github"):
 		{
+			if(!validate(content))
+				throw Assertive("Invalid content");
+
 			doc = content;
 			break;
 		}
 	}
+}
+
+
+bool message::validate(const std::string &content)
+{
+	const auto &opts(bot->opts);
+	if(!opts.has("yestifico-secret"))
+		return true;
+
+	if(sig.empty())
+		return false;
+
+	uint8_t buf[20];
+	const auto secret(opts["yestifico-secret"]);
+	HMAC(EVP_sha1(), secret.data(), secret.size(), (const uint8_t *)content.data(), content.size(), buf, NULL);
+
+	char hmac[41];
+	for(size_t i(0); i < sizeof(buf); i++)
+		sprintf(hmac + i * 2, "%02x", buf[i]);
+
+	std::cout << "HMAC: " << hmac << std::endl;
+	return sig == hmac;
 }
 
 

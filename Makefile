@@ -100,7 +100,7 @@ yestifico: main.o
 	$(YESTIFICO_CC) -o $@ $(YESTIFICO_CCFLAGS) -rdynamic $(YESTIFICO_LDFLAGS) $^ -lircbot -lleveldb -lboost_system -lpthread -ldl
 
 yestifico.so: yestifico.o
-	$(YESTIFICO_CC) -o $@ $(YESTIFICO_CCFLAGS) -shared $(YESTIFICO_LDFLAGS) $^
+	$(YESTIFICO_CC) -o $@ $(YESTIFICO_CCFLAGS) -shared $(YESTIFICO_LDFLAGS) $^ -lcrypto
 
 yestifico.o: yestifico.cpp
 	$(YESTIFICO_CC) -c -o $@ $(YESTIFICO_CCFLAGS) -fPIC $<
