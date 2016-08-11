@@ -1,6 +1,6 @@
 ###############################################################################
 #
-# SPQF Makefile
+# YESTIFICO Makefile
 #
 #	Author:
 #		COPYRIGHT (C) Jason Volk 2016
@@ -19,7 +19,7 @@
 
 ###############################################################################
 #
-# SPQF options
+# YESTIFICO options
 #
 
 YESTIFICO_CC       := g++
@@ -27,40 +27,40 @@ YESTIFICO_VERSTR   := $(shell git describe --tags)
 YESTIFICO_CCFLAGS  := -std=c++14 -Iircbot/stldb -DYESTIFICO_VERSION=\"$(YESTIFICO_VERSTR)\" -fstack-protector
 YESTIFICO_LDFLAGS  += -fuse-ld=gold -Wl,--no-gnu-unique -Lircbot/
 YESTIFICO_WFLAGS   += -pedantic                             \
-                 -Wall                                 \
-                 -Wextra                               \
-                 -Wcomment                             \
-                 -Waddress                             \
-                 -Winit-self                           \
-                 -Wuninitialized                       \
-                 -Wunreachable-code                    \
-                 -Wvolatile-register-var               \
-                 -Wvariadic-macros                     \
-                 -Woverloaded-virtual                  \
-                 -Wpointer-arith                       \
-                 -Wlogical-op                          \
-                 -Wcast-align                          \
-                 -Wcast-qual                           \
-                 -Wstrict-aliasing=2                   \
-                 -Wstrict-overflow                     \
-                 -Wwrite-strings                       \
-                 -Wformat-y2k                          \
-                 -Wformat-security                     \
-                 -Wformat-nonliteral                   \
-                 -Wfloat-equal                         \
-                 -Wdisabled-optimization               \
-                 -Wno-missing-field-initializers       \
-                 -Wmissing-format-attribute            \
-                 -Wno-unused-parameter                 \
-                 -Wno-unused-label                     \
-                 -Wno-unused-variable                  \
-                 -Wsuggest-attribute=format
+                      -Wall                                 \
+                      -Wextra                               \
+                      -Wcomment                             \
+                      -Waddress                             \
+                      -Winit-self                           \
+                      -Wuninitialized                       \
+                      -Wunreachable-code                    \
+                      -Wvolatile-register-var               \
+                      -Wvariadic-macros                     \
+                      -Woverloaded-virtual                  \
+                      -Wpointer-arith                       \
+                      -Wlogical-op                          \
+                      -Wcast-align                          \
+                      -Wcast-qual                           \
+                      -Wstrict-aliasing=2                   \
+                      -Wstrict-overflow                     \
+                      -Wwrite-strings                       \
+                      -Wformat-y2k                          \
+                      -Wformat-security                     \
+                      -Wformat-nonliteral                   \
+                      -Wfloat-equal                         \
+                      -Wdisabled-optimization               \
+                      -Wno-missing-field-initializers       \
+                      -Wmissing-format-attribute            \
+                      -Wno-unused-parameter                 \
+                      -Wno-unused-label                     \
+                      -Wno-unused-variable                  \
+                      -Wsuggest-attribute=format
 
 
 
 ###############################################################################
 #
-# Composition of SPQF options and user environment options
+# Composition of YESTIFICO options and user environment options
 #
 
 
