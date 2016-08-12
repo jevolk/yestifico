@@ -32,26 +32,21 @@ struct message
 	std::string src;                     // github/travis/...
 	std::string sig;                     // github hmac
 	std::string event;                   // push/ping/...
-	size_t content_length;
+	size_t content_length = 0;
+	size_t head_size = 0;
 	Adoc doc;
 
 	bool validate(const std::string &content);
-
-	message(std::istream &in);
+	void parse_body(std::istream &in);
+	void parse_head(std::istream &in);
 };
 
 
-message::message(std::istream &in)
-:cmd
-{
-	getline_crlf(in)
-}
-,content_length
-{
-	0
-}
+void message::parse_head(std::istream &in)
 {
 	// parse HTTP
+	cmd = getline_crlf(in);
+
 	if(cmd.empty())
 		throw Assertive("No HTTP command");
 
@@ -86,34 +81,33 @@ message::message(std::istream &in)
 
 	if(!content_length)
 		throw Assertive("content-length missing");
+}
 
-	// parse body
-	std::string content(getline_crlf(in));
-	std::cout << "BODY " << content << std::endl;
 
-	if(content_length != content.size())
-		throw Assertive("content-length mismatch")
-		                << " expecting: " << content_length
-		                << " got: " << content.size();
+void message::parse_body(std::istream &in)
+{
+	std::unique_ptr<char[]> buf(new char[content_length + 1]);
+	memset(buf.get(), 0x0, content_length + 1);
+	in.read(buf.get(), content_length);
+	std::cout << "BODY " << std::string(buf.get()) << std::endl;
 
 	switch(hash(src))
 	{
 		case hash("travis"):
 		{
-			std::unique_ptr<char[]> buf(new char[1024 * 1024 * 5]);
-			memset(buf.get(), 0x0, 1024 * 1024 * 5);
-			urldecode2(buf.get(), split(content, "=").second.c_str());
-			doc = std::string(buf.get());
+			std::unique_ptr<char[]> buf2(new char[1024 * 1024 * 5]);
+			urldecode2(buf2.get(), split(buf.get(), "=").second.c_str());
+			doc = std::string(buf2.get());
 			break;
 		}
 
 		default:
 		case hash("github"):
 		{
-			if(!validate(content))
+			if(!validate(buf.get()))
 				throw Assertive("Invalid content");
 
-			doc = content;
+			doc = std::string(buf.get());
 			break;
 		}
 	}
@@ -146,19 +140,24 @@ struct client
 :std::enable_shared_from_this<client>
 {
 	boost::asio::ip::tcp::socket socket;
-	boost::asio::streambuf in, out;
-	decltype(clients)::iterator clit;
+	boost::asio::streambuf in, out;         // socket buffers
+	decltype(clients)::iterator clit;       // pointer into the client list
+	std::unique_ptr<message> msg;           // current message state
 
+	void error_to_chan(const std::exception &e);
 	void respond(const std::string &status = "200 OK");
 
-	void handle_github_status(message &message);
-	void handle_github_push(message &message);
-	void handle_github_ping(message &message);
-	void handle_github(message &message);
-	void handle_travis(message &message);
-	void parse(std::istream &input);
-	void handle(const boost::system::error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
-	void set_handler();
+	void handle_github_status();
+	void handle_github_push();
+	void handle_github_ping();
+	void handle_github();
+	void handle_travis();
+
+	size_t handle_xfer(const boost::system::error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
+	void handle_body(const boost::system::error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
+	void handle_head(const boost::system::error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
+	void set_body_handler();
+	void set_head_handler();
 
 	client();
 	~client();
@@ -182,9 +181,11 @@ client::client()
 {
 	clients.emplace(end(clients), this)
 }
+,msg
 {
-	in.prepare(in.max_size());
-	out.prepare(out.max_size());
+	std::make_unique<message>()
+}
+{
 }
 
 
@@ -194,7 +195,7 @@ client::~client()
 }
 
 
-void client::set_handler()
+void client::set_head_handler()
 {
 	static const auto terminator
 	{
@@ -203,16 +204,32 @@ void client::set_handler()
 
 	const auto callback
 	{
-		std::bind(&client::handle, this, ph::_1, ph::_2, shared_from_this())
+		std::bind(&client::handle_head, this, ph::_1, ph::_2, shared_from_this())
 	};
 
 	async_read_until(socket, in, terminator, callback);
 }
 
 
-void client::handle(const boost::system::error_code &ec,
-                    size_t avail,
-                    std::shared_ptr<client>)
+void client::set_body_handler()
+{
+	const auto callback
+	{
+		std::bind(&client::handle_body, this, ph::_1, ph::_2, shared_from_this())
+	};
+
+	const auto condition
+	{
+		std::bind(&client::handle_xfer, this, ph::_1, ph::_2, shared_from_this())
+	};
+
+	async_read(socket, in, condition, callback);
+}
+
+
+void client::handle_head(const boost::system::error_code &ec,
+                         size_t avail,
+                         std::shared_ptr<client>)
 noexcept try
 {
 	const std::lock_guard<Bot> lock(*bot);
@@ -230,57 +247,83 @@ noexcept try
 			throw boost::system::error_code(ec);
 	}
 
-	const scope reset([this, &avail]
-	{
-		in.consume(avail);
-		set_handler();
-	});
-
 	std::istream in(&this->in);
-	parse(in);
-	respond();
+	msg->head_size = avail;
+	msg->parse_head(in);
+	set_body_handler();
 }
 catch(const std::exception &e)
 {
 	const std::lock_guard<Bot> lock(*bot);
-	auto &chan(bot->chans.get(channame));
-
-	if(socket.is_open())
-		chan << "client[" << socket.remote_endpoint() << "] ";
-
-	chan << "error: " << e.what() << chan.flush;
+	error_to_chan(e);
 }
 
 
-void client::parse(std::istream &in)
+size_t client::handle_xfer(const boost::system::error_code &ec,
+                           size_t avail,
+                           std::shared_ptr<client>)
+noexcept
 {
-	auto &chan(bot->chans.get(channame));
-	const scope reset([&chan]
+	return avail >= msg->content_length - msg->head_size? 0 : msg->content_length - avail;
+}
+
+
+void client::handle_body(const boost::system::error_code &ec,
+                         size_t avail,
+                         std::shared_ptr<client>)
+noexcept try
+{
+	const std::lock_guard<Bot> lock(*bot);
+	switch(ec.value())
 	{
-		// Ensure no partial writes to the channel stream when interrupted by exception
+		using namespace boost::system::errc;
+
+		case success:                     break;
+		case boost::asio::error::eof:     return;
+		case operation_canceled:
+			cond.notify_all();
+			return;
+
+		default:
+			throw boost::system::error_code(ec);
+	}
+
+	auto &chan(bot->chans.get(channame));
+	const scope reset([this, &avail, &chan]
+	{
 		if(std::current_exception())
 			chan.clear();
+
+		msg.reset();
+		set_head_handler();
 	});
 
-	message message(in);
-	switch(hash(message.src))
+	std::istream in(&this->in);
+	msg->parse_body(in);
+	switch(hash(msg->src))
 	{
-		case hash("github"):    handle_github(message);   break;
-		case hash("travis"):    handle_travis(message);   break;
+		case hash("github"):    handle_github();   break;
+		case hash("travis"):    handle_travis();   break;
 		default:
 			throw Assertive("unknown webhook source");
 	}
 
 	chan << chan.flush;
+	respond();
+}
+catch(const std::exception &e)
+{
+	const std::lock_guard<Bot> lock(*bot);
+	error_to_chan(e);
 }
 
 
-void client::handle_travis(message &message)
+void client::handle_travis()
 {
 	using namespace colors;
 
 	auto &chan(bot->chans.get(channame));
-	auto &doc(message.doc);
+	auto &doc(msg->doc);
 
 	chan << BOLD << doc["repository.owner_name"] << "/" << doc["repository.name"] << OFF;
 
@@ -296,12 +339,12 @@ void client::handle_travis(message &message)
 }
 
 
-void client::handle_github(message &message)
+void client::handle_github()
 {
 	using namespace colors;
 
 	auto &chan(bot->chans.get(channame));
-	auto &doc(message.doc);
+	auto &doc(msg->doc);
 
 	if(doc.has("repository.full_name"))
 		chan << BOLD << doc["repository.full_name"] << OFF;
@@ -311,33 +354,33 @@ void client::handle_github(message &message)
 	else if(doc.has_child("sender"))
 		chan << " by " << doc["sender.login"];
 
-	chan << " " << message.event;
+	chan << " " << msg->event;
 
-	switch(hash(message.event))
+	switch(hash(msg->event))
 	{
-		case hash("ping"):         handle_github_ping(message);     break;
-		case hash("push"):         handle_github_push(message);     break;
-		case hash("status"):       handle_github_status(message);   break;
-		default:                                                    break;
+		case hash("ping"):         handle_github_ping();     break;
+		case hash("push"):         handle_github_push();     break;
+		case hash("status"):       handle_github_status();   break;
+		default:                                             break;
 	}
 }
 
 
-void client::handle_github_ping(message &message)
+void client::handle_github_ping()
 {
 	auto &chan(bot->chans.get(channame));
-	auto &doc(message.doc);
+	auto &doc(msg->doc);
 
 	chan << doc["id"];
 }
 
 
-void client::handle_github_push(message &message)
+void client::handle_github_push()
 {
 	using namespace colors;
 
 	auto &chan(bot->chans.get(channame));
-	auto &doc(message.doc);
+	auto &doc(msg->doc);
 
 	if(doc["forced"] == "true")
 		chan << " (rebase)";
@@ -364,12 +407,12 @@ void client::handle_github_push(message &message)
 }
 
 
-void client::handle_github_status(message &message)
+void client::handle_github_status()
 {
 	using namespace colors;
 
 	auto &chan(bot->chans.get(channame));
-	auto &doc(message.doc);
+	auto &doc(msg->doc);
 
 	switch(hash(doc["context"]))
 	{
@@ -408,6 +451,7 @@ void client::handle_github_status(message &message)
 
 void client::respond(const std::string &status)
 {
+	this->out.prepare(out.max_size());
 	std::ostream out(&this->out);
 	out << "HTTP/1.1 " << status << "\r\n";
 	out << "Content-Type: application/json\r\n";
@@ -418,6 +462,20 @@ void client::respond(const std::string &status)
 	const auto bufs(this->out.data());
 	const auto sent(socket.send(bufs));
 	this->out.consume(sent);
+}
+
+
+void client::error_to_chan(const std::exception &e)
+{
+	if(!bot->chans.has(channame))
+		return;
+
+	auto &chan(bot->chans.get(channame));
+
+	if(socket.is_open())
+		chan << "client[" << socket.remote_endpoint() << "] ";
+
+	chan << "error: " << e.what() << chan.flush;
 }
 
 
@@ -449,7 +507,7 @@ try
 			throw Exception(ec.message());
 	}
 
-	c->set_handler();
+	c->set_head_handler();
 }
 catch(const std::exception &e)
 {
