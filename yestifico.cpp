@@ -436,7 +436,11 @@ void client::handle_github_push()
 		if(commit["committer.email"] != commit["author.email"])
 			chan << " via " << commit["committer.name"];
 
-		chan << " (" << commit["url"] << ")";
+		auto url(commit["url"]);
+		const auto last_slash_pos(url.find_last_of('/'));
+		url = url.substr(0, last_slash_pos + 8);
+
+		chan << " (" << url << ")";
 		const auto cm(split(commit["message"], "\n").first);
 		chan << " " << UNDER2 << cm << OFF;
 		chan << chan.flush;
