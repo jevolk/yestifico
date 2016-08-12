@@ -1,8 +1,7 @@
 /** 
- *  COPYRIGHT 2014 (C) Jason Volk
- *  COPYRIGHT 2014 (C) Svetlana Tkachenko
+ *  COPYRIGHT 2016 (C) Jason Volk
  *
- *  DISTRIBUTED UNDER THE GNU GENERAL PUBLIC LICENSE (GPL) (see: LICENSE)
+ *  DISTRIBUTED UNDER THE GNU GENERAL PUBLIC LICENSE >= VERSION 1
  */
 
 #include <openssl/hmac.h>
