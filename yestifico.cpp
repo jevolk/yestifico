@@ -432,15 +432,16 @@ void client::handle_github_push()
 		const Adoc &commit(p.second.get_child("", Adoc{}));
 
 		chan << "*";
+
+		auto url(commit["url"]);
+		const auto last_slash_pos(url.find_last_of('/'));
+		url = url.substr(0, last_slash_pos + 9);
+		chan << " " << url;
+
 		chan << " " << commit["author.name"];
 		if(commit["committer.email"] != commit["author.email"])
 			chan << " via " << commit["committer.name"];
 
-		auto url(commit["url"]);
-		const auto last_slash_pos(url.find_last_of('/'));
-		url = url.substr(0, last_slash_pos + 8);
-
-		chan << " (" << url << ")";
 		const auto cm(split(commit["message"], "\n").first);
 		chan << " " << UNDER2 << cm << OFF;
 		chan << chan.flush;
