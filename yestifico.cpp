@@ -408,7 +408,7 @@ void client::handle_github_ping()
 	auto &chan(bot->chans.get(channame));
 	auto &doc(msg->doc);
 
-	chan << doc["id"];
+	chan << " " << doc["hook.id"] << " \"" << doc["zen"] << "\"";
 }
 
 
