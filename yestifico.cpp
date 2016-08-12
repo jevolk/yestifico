@@ -66,6 +66,10 @@ void message::parse_head(std::istream &in)
 				event = header.second;
 				continue;
 
+			case hash("travis-repo-slug"):
+				src = "travis";
+				continue;
+
 			case hash("x-hub-signature"):
 			{
 				const auto kv(split(header.second, "="));
@@ -323,17 +327,51 @@ void client::handle_travis()
 
 	auto &chan(bot->chans.get(channame));
 	auto &doc(msg->doc);
+	std::cout << doc << std::endl;
 
 	chan << BOLD << doc["repository.owner_name"] << "/" << doc["repository.name"] << OFF;
+	chan << " " << doc["number"];
 
 	for(const auto &p : doc.get_child("matrix", Adoc{}))
 	{
 		const Adoc &vm(p.second.get_child("", Adoc{}));
 		std::cout << vm << std::endl;
-		if(vm["status_message"] == "Still Failing")
-			chan << "[" << BG::RED << " " << OFF << "]";
+		chan << " " << vm["config.dist"] << " " << vm["config.compiler"];
+		switch(hash(vm["state"]))
+		{
+			case hash("started"):
+				 chan << "[" << BG::CYAN_BLINK << "S" << OFF << "]";
+				 break;
+
+			case hash("received"):
+				 chan << "[" << BG::LGRAY_BLINK << "R" << OFF << "]";
+				 break;
+
+			case hash("queued"):
+				 chan << "[" << BG::CYAN << "Q" << OFF << "]";
+				 break;
+
+			case hash("created"):
+				 chan << "[" << BG::LGRAY << "C" << OFF << "]";
+				 break;
+
+			case hash("finished"):
+				 chan << "[" << BG::GREEN << "F" << OFF << "]";
+				 break;
+
+			case hash("error"):
+				 chan << "[" << BG::ORANGE_BLINK << "E" << OFF << "]";
+				 break;
+
+			default:
+				 chan << "[" << "?" << "]";
+				 break;
+		}
+
+		chan << " ";
 	}
 
+	chan << chan.flush;
 	return;
 }
 
