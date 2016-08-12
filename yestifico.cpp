@@ -392,6 +392,10 @@ void client::handle_github_status(message &message)
 				chan << " " << FG::GREEN;
 
 			chan << doc["description"] << OFF;
+
+			if(doc.has("target_url"))
+				chan << " (" << doc["target_url"] << ")";
+
 			break;
 		}
 
