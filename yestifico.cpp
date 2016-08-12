@@ -358,7 +358,7 @@ void client::handle_github_push(message &message)
 
 		chan << " (" << commit["url"] << ")";
 		const auto cm(split(commit["message"], "\n").first);
-		chan << " " << BOLD << UNDER2 << cm << OFF;
+		chan << " " << UNDER2 << cm << OFF;
 		chan << chan.flush;
 	}
 }
