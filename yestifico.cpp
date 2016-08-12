@@ -386,12 +386,12 @@ void client::handle_github()
 	if(doc.has("repository.full_name"))
 		chan << BOLD << doc["repository.full_name"] << OFF;
 
+	chan << " " << msg->event;
+
 	if(doc.has_child("pusher"))
 		chan << " by " << doc["pusher.name"];
 	else if(doc.has_child("sender"))
 		chan << " by " << doc["sender.login"];
-
-	chan << " " << msg->event;
 
 	switch(hash(msg->event))
 	{
