@@ -431,7 +431,7 @@ void client::handle_github_push()
 	{
 		const Adoc &commit(p.second.get_child("", Adoc{}));
 
-		chan << "*";
+		chan << "|";
 
 		auto url(commit["url"]);
 		const auto last_slash_pos(url.find_last_of('/'));
@@ -456,6 +456,8 @@ void client::handle_github_status()
 	auto &chan(bot->chans.get(channame));
 	auto &doc(msg->doc);
 
+	chan << " ";
+
 	switch(hash(doc["context"]))
 	{
 		case hash("continuous-integration/travis-ci/push"):
@@ -468,13 +470,13 @@ void client::handle_github_status()
 			}
 
 			if(doc["state"] == "error")
-				chan << " " << FG::RED;
+				chan << FG::RED;
 
 			if(doc["state"] == "failure")
-				chan << " " << FG::LRED;
+				chan << FG::LRED;
 
 			if(doc["state"] == "success")
-				chan << " " << FG::GREEN;
+				chan << FG::GREEN;
 
 			chan << doc["description"] << OFF;
 
