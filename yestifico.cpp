@@ -460,6 +460,7 @@ void client::handle_github_status()
 
 	switch(hash(doc["context"]))
 	{
+		case hash("continuous-integration/appveyor/branch"):
 		case hash("continuous-integration/travis-ci/push"):
 		{
 			if(doc["state"] == "pending")
