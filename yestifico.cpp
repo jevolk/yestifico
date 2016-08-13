@@ -382,9 +382,8 @@ void client::handle_travis()
 				chan  << "?";
 				break;
 		}
-
-		chan << BOLD << "|" << OFF;
 	}
+	chan << BOLD << "|" << OFF;
 
 	if(doc.has("duration") && doc["duration"] != "null")
 		chan << " in " << secs_cast(secs_cast(doc["duration"]));
