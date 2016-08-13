@@ -329,50 +329,74 @@ void client::handle_travis()
 	auto &doc(msg->doc);
 	std::cout << doc << std::endl;
 
+	if(doc.has("state") && doc["state"] == "started")
+		return;
+
 	chan << BOLD << doc["repository.owner_name"] << "/" << doc["repository.name"] << OFF;
 	chan << " " << doc["number"];
 
+	chan << BOLD << " |" << OFF;
 	for(const auto &p : doc.get_child("matrix", Adoc{}))
 	{
 		const Adoc &vm(p.second.get_child("", Adoc{}));
 		std::cout << vm << std::endl;
-		chan << " " << vm["config.dist"] << " " << vm["config.compiler"];
 		switch(hash(vm["state"]))
 		{
 			case hash("started"):
-				 chan << "[" << BG::CYAN_BLINK << "S" << OFF << "]";
-				 break;
+				chan << BOLD << FG::WHITE << BG::CYAN_BLINK << "S" << OFF;
+				break;
 
 			case hash("received"):
-				 chan << "[" << BG::LGRAY_BLINK << "R" << OFF << "]";
-				 break;
+				chan << BOLD << FG::WHITE << BG::LGRAY_BLINK << "R" << OFF;
+				break;
 
 			case hash("queued"):
-				 chan << "[" << BG::CYAN << "Q" << OFF << "]";
-				 break;
+				chan << BOLD << FG::WHITE << BG::CYAN << "Q" << OFF;
+				break;
 
 			case hash("created"):
-				 chan << "[" << BG::LGRAY << "C" << OFF << "]";
-				 break;
+				chan << BOLD << FG::WHITE << BG::LGRAY << "C" << OFF;
+				break;
 
 			case hash("finished"):
-				 chan << "[" << BG::GREEN << "F" << OFF << "]";
-				 break;
+				if(vm["result"] == "0")  // "0" for success
+				{
+					chan << BOLD << FG::WHITE << BG::GREEN << "+" << OFF;
+					break;
+				}
+
+			case hash("failed"):
+				chan << BOLD << FG::WHITE << BG::ORANGE << "-" << OFF;
+				break;
 
 			case hash("error"):
-				 chan << "[" << BG::ORANGE_BLINK << "E" << OFF << "]";
-				 break;
+				chan << BOLD << FG::WHITE << BG::ORANGE_BLINK << "X" << OFF;
+				break;
 
 			default:
-				 chan << "[" << "?" << "]";
-				 break;
+				chan  << "?";
+				break;
 		}
 
-		chan << " ";
+		chan << BOLD << "|" << OFF;
+	}
+
+	if(doc.has("duration") && doc["duration"] != "null")
+		chan << " in " << secs_cast(secs_cast(doc["duration"]));
+
+	if(doc.has("commit"))
+	{
+		const auto commit(doc["commit"].substr(0, 8));
+		chan << " " << commit;
+	}
+
+	if(doc.has("message"))
+	{
+		const auto cm(split(doc["message"], "\n").first);
+		chan << " " << UNDER2 << cm << OFF;
 	}
 
 	chan << chan.flush;
-	return;
 }
 
 
