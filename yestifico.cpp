@@ -449,11 +449,11 @@ void client::handle_github_push()
 	auto &chan(bot->chans.get(channame));
 	auto &doc(msg->doc);
 
-	if(doc["forced"] == "true")
-		chan << " (rebase)";
-
 	if(doc.has("head_commit.id"))
 		chan << " @ " << BOLD << FG::CYAN << doc["head_commit.id"] << OFF;
+
+	if(doc["forced"] == "true")
+		chan << " (rebase)";
 
 	const auto commits(doc.get_child("commits", Adoc{}));
 	const auto num(std::distance(begin(commits), end(commits)));
