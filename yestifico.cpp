@@ -338,6 +338,17 @@ void client::handle_travis()
 		return;
 
 	chan << BOLD << doc["repository.owner_name"] << "/" << doc["repository.name"] << OFF;
+
+	const auto commit
+	{
+		doc.has("commit") && doc["commit"] != "null"?             doc["commit"]:
+		doc.has("head_commit") && doc["head_commit"] != "null"?   doc["head_commit"]:
+		                                                          std::string{}
+	};
+
+	if(!commit.empty())
+		chan << " " << commit.substr(0, 8);
+
 	chan << " " << doc["number"];
 
 	chan << BOLD << " |" << OFF;
@@ -371,7 +382,7 @@ void client::handle_travis()
 				}
 
 			case hash("failed"):
-				chan << BOLD << FG::WHITE << BG::ORANGE << "-" << OFF;
+				chan << BOLD << FG::WHITE << BG::RED << "-" << OFF;
 				break;
 
 			case hash("error"):
@@ -387,12 +398,6 @@ void client::handle_travis()
 
 	if(doc.has("duration") && doc["duration"] != "null")
 		chan << " in " << secs_cast(secs_cast(doc["duration"]));
-
-	if(doc.has("commit"))
-	{
-		const auto commit(doc["commit"].substr(0, 8));
-		chan << " " << commit;
-	}
 
 	if(doc.has("message"))
 	{
@@ -413,6 +418,31 @@ void client::handle_github()
 
 	if(doc.has("repository.full_name"))
 		chan << BOLD << doc["repository.full_name"] << OFF;
+
+	const auto commit
+	{
+		doc.has("sha")?              doc["sha"]:
+		doc.has("commit.sha")?       doc["commit.sha"]:
+		doc.has("head.commit")?      doc["head.commit"]:
+		doc.has("head_commit.id")?   doc["head_commit.id"]:
+		doc.has("commit")?           doc["commit"]:
+		                             std::string{}
+	};
+
+	if(!commit.empty())
+	{
+		chan << " ";
+		switch(hash(msg->event))
+		{
+			case hash("push"):           chan << FG::ORANGE;             break;
+			case hash("pull_request"):   chan << BOLD << FG::MAGENTA;    break;
+		}
+
+		chan << commit.substr(0, 8) << OFF;
+	}
+
+	if(doc.has("ref"))
+		chan << " " << doc["ref"];
 
 	chan << " " << msg->event;
 
@@ -447,9 +477,6 @@ void client::handle_github_push()
 
 	auto &chan(bot->chans.get(channame));
 	auto &doc(msg->doc);
-
-	if(doc.has("head_commit.id"))
-		chan << " @ " << BOLD << FG::CYAN << doc["head_commit.id"] << OFF;
 
 	if(doc["forced"] == "true")
 		chan << " (rebase)";
