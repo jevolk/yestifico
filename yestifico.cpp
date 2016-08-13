@@ -251,8 +251,12 @@ noexcept try
 	}
 
 	std::istream in(&this->in);
-	msg->head_size = avail;
 	msg->parse_head(in);
+
+	msg->head_size = avail;
+	if(msg->content_length + avail >= this->in.max_size())
+		return;
+
 	set_body_handler();
 }
 catch(const std::exception &e)
