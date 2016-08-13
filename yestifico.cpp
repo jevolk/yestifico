@@ -453,9 +453,15 @@ void client::handle_github_push()
 	if(doc.has("head_commit.id"))
 		chan << " @ " << BOLD << FG::CYAN << doc["head_commit.id"] << OFF;
 
+	const auto commits(doc.get_child("commits", Adoc{}));
+	const auto num(std::distance(begin(commits), end(commits)));
+	chan << " " << num << " commits";
+	if(num > 15)
+		chan << FG::LGRAY << "(please be patient)" << OFF;
+
 	chan << chan.flush; // Flush to start new lines for the commits
 
-	for(const auto &p : doc.get_child("commits", Adoc{}))
+	for(const auto &p : commits)
 	{
 		const Adoc &commit(p.second.get_child("", Adoc{}));
 
