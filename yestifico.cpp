@@ -520,7 +520,10 @@ void client::handle_github_status()
 			chan << doc["description"] << OFF;
 
 			if(doc.has("target_url"))
-				chan << " (" << doc["target_url"] << ")";
+			{
+				const auto commit(doc["commit"].substr(0, 8));
+				chan << commit << " (" << doc["target_url"] << ")";
+			}
 
 			break;
 		}
