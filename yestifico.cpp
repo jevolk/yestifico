@@ -150,6 +150,7 @@ struct client
 	void error_to_chan(const std::exception &e);
 	void respond(const std::string &status = "200 OK");
 
+	void handle_github_pull_request();
 	void handle_github_status();
 	void handle_github_push();
 	void handle_github_ping();
@@ -423,10 +424,11 @@ void client::handle_github()
 
 	switch(hash(msg->event))
 	{
-		case hash("ping"):         handle_github_ping();     break;
-		case hash("push"):         handle_github_push();     break;
-		case hash("status"):       handle_github_status();   break;
-		default:                                             break;
+		case hash("ping"):           handle_github_ping();           break;
+		case hash("push"):           handle_github_push();           break;
+		case hash("status"):         handle_github_status();         break;
+		case hash("pull_request"):   handle_github_pull_request();   break;
+		default:                                                     break;
 	}
 }
 
@@ -494,7 +496,9 @@ void client::handle_github_status()
 
 	switch(hash(doc["context"]))
 	{
+		case hash("continuous-integration/appveyor/pr"):
 		case hash("continuous-integration/appveyor/branch"):
+		case hash("continuous-integration/travis-ci/pr"):
 		case hash("continuous-integration/travis-ci/push"):
 		{
 			if(doc["state"] == "pending")
@@ -525,6 +529,53 @@ void client::handle_github_status()
 			chan << "context: " << doc["context"] << " unhandled";
 			break;
 	}
+}
+
+
+void client::handle_github_pull_request()
+{
+	using namespace colors;
+
+	auto &chan(bot->chans.get(channame));
+	auto &doc(msg->doc);
+
+	chan << " " << doc["action"];
+	chan << " " << BOLD << "#" << doc["number"] << OFF;
+	chan << " " << UNDER2 << doc["pull_request.title"] << OFF;
+
+	chan << " ";
+	switch(hash(doc["mergeable"]))
+	{
+		default:
+		case hash("null"):
+			//chan << BOLD << FG::BLACK << BG::LGRAY << "TESTING IF MERGEABLE" << OFF;
+			break;
+
+		case hash("true"):
+			chan << BOLD << FG::WHITE << BG::GREEN_BLINK << "MERGEABLE" << OFF;
+			break;
+
+		case hash("false"):
+			chan << BOLD << FG::WHITE << BG::RED << "NOT MERGEABLE" << OFF;
+			break;
+	}
+
+	if(doc["merged"] == "true")
+		chan << " " << BOLD << FG::WHITE << BG::GREEN << "MERGED" << OFF;
+
+	if(doc.has("merged_by"))
+		chan << " by " << BOLD << doc["merged_by.login"] << OFF;
+
+	if(doc.has("additions"))
+		chan << " " << BOLD << doc["additions"] << " " << FG::GREEN << "++" << OFF;
+
+	if(doc.has("deletions"))
+		chan << " " << BOLD << doc["deletions"] << " " << FG::RED << "--" << OFF;
+
+	if(doc.has("changed_files"))
+		chan << " " << BOLD << doc["changed_files"] << " " << FG::LGRAY << " files" << OFF;
+
+	chan << chan.flush;
 }
 
 
