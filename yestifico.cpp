@@ -5,11 +5,14 @@
  */
 
 #include <openssl/hmac.h>
+#include <boost/asio/ssl.hpp>
 #include "ircbot/bot.h"
 #include "urldecode2.h"
 
-using std::for_each;
 namespace ph = std::placeholders;
+namespace ip = boost::asio::ip;
+using std::for_each;
+using boost::system::error_code;
 using namespace irc::bot;
 
 
@@ -19,10 +22,12 @@ std::string channame;
 
 std::condition_variable cond;            // rang when clients and acceptor callbacks have canceled
 std::list<struct client *> clients;
-std::unique_ptr<boost::asio::ip::tcp::acceptor> acceptor;
+
+std::unique_ptr<ip::tcp::acceptor> acceptor;
+std::unique_ptr<boost::asio::ssl::context> sslctx;
 
 std::string getline_crlf(std::istream &in);
-
+bool errored(const error_code &ec);
 
 
 struct message
@@ -31,12 +36,12 @@ struct message
 	std::string src;                     // github/travis/...
 	std::string sig;                     // github hmac
 	std::string event;                   // push/ping/...
+	std::string status;                  // 200 OK ...
 	size_t content_length = 0;
-	size_t head_size = 0;
 	Adoc doc;
 
 	bool validate(const std::string &content);
-	void parse_body(std::istream &in);
+	void parse_body(std::istream &in, const bool &validate = true);
 	void parse_head(std::istream &in);
 };
 
@@ -57,6 +62,10 @@ void message::parse_head(std::istream &in)
 		const auto header(split(line, ": "));
 		switch(hash(tolower(header.first)))
 		{
+			case hash("status"):
+				status = tolower(header.second);
+				continue;
+
 			case hash("content-length"):
 				content_length = lex_cast<size_t>(header.second);
 				continue;
@@ -79,15 +88,21 @@ void message::parse_head(std::istream &in)
 				sig = kv.second;
 				continue;
 			}
+
+			case hash("server"):
+				switch(hash(tolower(header.second)))
+				{
+					case hash("github.com"):
+						src = "github";
+						break;
+				}
+				continue;
 		}
 	}
-
-	if(!content_length)
-		throw Assertive("content-length missing");
 }
 
 
-void message::parse_body(std::istream &in)
+void message::parse_body(std::istream &in, const bool &validate)
 {
 	std::unique_ptr<char[]> buf(new char[content_length + 1]);
 	memset(buf.get(), 0x0, content_length + 1);
@@ -107,7 +122,7 @@ void message::parse_body(std::istream &in)
 		default:
 		case hash("github"):
 		{
-			if(!validate(buf.get()))
+			if(validate && !this->validate(buf.get()))
 				throw Assertive("Invalid content");
 
 			doc = std::string(buf.get());
@@ -142,26 +157,41 @@ bool message::validate(const std::string &content)
 struct client
 :std::enable_shared_from_this<client>
 {
-	boost::asio::ip::tcp::socket socket;
-	boost::asio::streambuf in, out;         // socket buffers
+	ip::tcp::socket socket;
+	boost::asio::ssl::stream<ip::tcp::socket> sslstream;
+	boost::asio::streambuf in;              // socket buffers
 	decltype(clients)::iterator clit;       // pointer into the client list
 	std::unique_ptr<message> msg;           // current message state
+	std::string request;
 
 	void error_to_chan(const std::exception &e);
+
+	void send(const std::string &data);
 	void respond(const std::string &status = "200 OK");
 
 	void handle_github_pull_request();
 	void handle_github_status();
 	void handle_github_push();
 	void handle_github_ping();
+
+	void handle_github_response_error();
+	void handle_github_response();
+	void handle_github_event();
 	void handle_github();
+
 	void handle_travis();
 
-	size_t handle_xfer(const boost::system::error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
-	void handle_body(const boost::system::error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
-	void handle_head(const boost::system::error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
+	void handle_handshake(const error_code &ec, std::shared_ptr<client>) noexcept;
+	void handle_connect(const error_code &ec, std::shared_ptr<client>) noexcept;
+	void handle_resolve(const error_code &ec, ip::tcp::resolver::iterator, std::shared_ptr<client>) noexcept;
+	size_t handle_xfer(const error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
+	void handle_body(const error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
+	void handle_head(const error_code &ec, size_t avail, std::shared_ptr<client>) noexcept;
 	void set_body_handler();
 	void set_head_handler();
+
+	// connect and make request
+	void operator()(const std::string &host, const std::string &request);
 
 	client();
 	~client();
@@ -173,13 +203,13 @@ client::client()
 {
 	*ios
 }
+,sslstream
+{
+	*ios, *sslctx
+}
 ,in
 {
 	1024 * 1024 * 5     // GH says they cap webhooks at 5 MiB
-}
-,out
-{
-	65536               // Arbitrary send buffer max size
 }
 ,clit
 {
@@ -199,6 +229,28 @@ client::~client()
 }
 
 
+void client::operator()(const std::string &host,
+                        const std::string &request)
+{
+	if(sslstream.lowest_layer().is_open())
+	{
+		set_head_handler();
+		send(request);
+		return;
+	}
+
+	this->request = request;
+	ip::tcp::resolver resolver(*ios);
+	const ip::tcp::resolver::query query(host, "https");
+	//const auto cb(std::bind(&client::handle_resolve, this, ph::_1, ph::_2, shared_from_this()));
+	//resolver.async_resolve(query, cb);
+
+	const auto it(resolver.resolve(query));
+	const auto cb(std::bind(&client::handle_connect, this, ph::_1, shared_from_this()));
+	boost::asio::async_connect(sslstream.lowest_layer(), it, cb);
+}
+
+
 void client::set_head_handler()
 {
 	static const auto terminator
@@ -211,7 +263,10 @@ void client::set_head_handler()
 		std::bind(&client::handle_head, this, ph::_1, ph::_2, shared_from_this())
 	};
 
-	async_read_until(socket, in, terminator, callback);
+	if(socket.is_open())
+		async_read_until(socket, in, terminator, callback);
+	else if(sslstream.lowest_layer().is_open())
+		async_read_until(sslstream, in, terminator, callback);
 }
 
 
@@ -227,75 +282,160 @@ void client::set_body_handler()
 		std::bind(&client::handle_xfer, this, ph::_1, ph::_2, shared_from_this())
 	};
 
-	async_read(socket, in, condition, callback);
+	if(socket.is_open())
+		async_read(socket, in, condition, callback);
+	else if(sslstream.lowest_layer().is_open())
+		async_read(sslstream, in, condition, callback);
 }
 
 
-void client::handle_head(const boost::system::error_code &ec,
-                         size_t avail,
-                         std::shared_ptr<client>)
+void client::handle_resolve(const error_code &ec,
+                            ip::tcp::resolver::iterator it,
+                            std::shared_ptr<client>)
 noexcept try
 {
-	const std::lock_guard<Bot> lock(*bot);
-	switch(ec.value())
-	{
-		using namespace boost::system::errc;
-
-		case success:                     break;
-		case boost::asio::error::eof:     return;
-		case operation_canceled:
-			cond.notify_all();
-			return;
-
-		default:
-			throw boost::system::error_code(ec);
-	}
-
-	std::istream in(&this->in);
-	msg->parse_head(in);
-
-	msg->head_size = avail;
-	if(msg->content_length + avail >= this->in.max_size())
+	if(errored(ec))
 		return;
 
-	set_body_handler();
+	const std::lock_guard<Bot> lock(*bot);
+	if(it == ip::tcp::resolver::iterator())
+	{
+		std::cerr << "handle_resolve(): got nothing." << std::endl;
+		return;
+	}
+
+	const ip::tcp::endpoint ep(*it);
+	std::cout << "resolved: " << ep << std::endl;
+
+	const auto cb(std::bind(&client::handle_connect, this, ph::_1, shared_from_this()));
+	boost::asio::async_connect(sslstream.lowest_layer(), it, cb);
 }
 catch(const std::exception &e)
 {
-	const std::lock_guard<Bot> lock(*bot);
-	error_to_chan(e);
+	std::cerr << "handle_resolve: " << e.what() << std::endl;
 }
-
-
-size_t client::handle_xfer(const boost::system::error_code &ec,
-                           size_t avail,
-                           std::shared_ptr<client>)
-noexcept
+catch(...)
 {
-	return avail >= msg->content_length - msg->head_size? 0 : msg->content_length - avail;
+	std::cerr << "handle_resolve: unknown exception!" << std::endl;
 }
 
 
-void client::handle_body(const boost::system::error_code &ec,
+void client::handle_connect(const error_code &ec,
+                            std::shared_ptr<client>)
+noexcept try
+{
+	if(errored(ec))
+		return;
+
+	const std::lock_guard<Bot> lock(*bot);
+	auto &sock(sslstream.lowest_layer());
+	sock.set_option(ip::tcp::no_delay(true));
+	sslstream.set_verify_mode(boost::asio::ssl::verify_none);
+	//sslstream.set_verify_mode(boost::asio::ssl::verify_peer);
+	sslstream.set_verify_callback(boost::asio::ssl::rfc2818_verification("api.github.com"));
+
+	const auto cb(std::bind(&client::handle_handshake, this, ph::_1, shared_from_this()));
+	sslstream.async_handshake(boost::asio::ssl::stream_base::client, cb);
+	std::cout << "connected: " << std::endl;
+}
+catch(const std::exception &e)
+{
+	std::cerr << "handle_connect: " << e.what() << std::endl;
+}
+catch(...)
+{
+	std::cerr << "handle_connect: unknown exception!" << std::endl;
+}
+
+
+void client::handle_handshake(const error_code &ec,
+                              std::shared_ptr<client>)
+noexcept try
+{
+	if(errored(ec))
+		return;
+
+	const std::lock_guard<Bot> lock(*bot);
+	set_head_handler();
+	send(request);
+}
+catch(const std::exception &e)
+{
+	std::cerr << "handle_handshake: " << e.what() << std::endl;
+}
+catch(...)
+{
+	std::cerr << "handle_handshake: unknown exception!" << std::endl;
+}
+
+
+void client::handle_head(const error_code &ec,
                          size_t avail,
                          std::shared_ptr<client>)
 noexcept try
 {
-	const std::lock_guard<Bot> lock(*bot);
-	switch(ec.value())
-	{
-		using namespace boost::system::errc;
+	if(errored(ec))
+		return;
 
-		case success:                     break;
-		case boost::asio::error::eof:     return;
-		case operation_canceled:
-			cond.notify_all();
+	const std::lock_guard<Bot> lock(*bot); try
+	{
+		std::istream in(&this->in);
+		msg->parse_head(in);
+		if(msg->content_length + avail >= this->in.max_size())
 			return;
 
-		default:
-			throw boost::system::error_code(ec);
+		if(msg->content_length)
+			set_body_handler();
 	}
+	catch(const std::exception &e)
+	{
+		error_to_chan(e);
+	}
+}
+catch(const std::exception &e)
+{
+	std::cerr << "handle_head: " << e.what() << std::endl;
+}
+catch(...)
+{
+	std::cerr << "handle_head: unknown exception!" << std::endl;
+}
 
+
+size_t client::handle_xfer(const error_code &ec,
+                           size_t avail,
+                           std::shared_ptr<client>)
+noexcept try
+{
+	if(ec == boost::asio::error::eof || errored(ec))
+		return 0;
+
+	if(avail >= msg->content_length)
+		return 0;
+
+	return msg->content_length - in.size();
+}
+catch(const std::exception &e)
+{
+	std::cerr << "handle_xfer: " << e.what() << std::endl;
+	return 0;
+}
+catch(...)
+{
+	std::cerr << "handle_xfer: unknown exception!" << std::endl;
+	return 0;
+}
+
+
+void client::handle_body(const error_code &ec,
+                         size_t avail,
+                         std::shared_ptr<client>)
+noexcept try
+{
+	if(errored(ec))
+		return;
+
+	const std::lock_guard<Bot> lock(*bot);
 	auto &chan(bot->chans.get(channame));
 	const scope reset([this, &avail, &chan]
 	{
@@ -307,7 +447,8 @@ noexcept try
 	});
 
 	std::istream in(&this->in);
-	msg->parse_body(in);
+	const bool validate(socket.is_open()); // hack check: no validation on the ssl socket (plaintext socket is closed)
+	msg->parse_body(in, validate);
 	switch(hash(msg->src))
 	{
 		case hash("github"):    handle_github();   break;
@@ -315,14 +456,15 @@ noexcept try
 		default:
 			throw Assertive("unknown webhook source");
 	}
-
-	chan << chan.flush;
-	respond();
 }
 catch(const std::exception &e)
 {
 	const std::lock_guard<Bot> lock(*bot);
 	error_to_chan(e);
+}
+catch(...)
+{
+	std::cerr << "handle_body: unknown exception!" << std::endl;
 }
 
 
@@ -406,10 +548,80 @@ void client::handle_travis()
 	}
 
 	chan << chan.flush;
+	respond();
 }
 
 
 void client::handle_github()
+{
+	using namespace colors;
+
+	if(msg->event.empty())
+	{
+		handle_github_response();
+		return;
+	}
+
+	handle_github_event();
+	respond();
+}
+
+
+void client::handle_github_response()
+{
+	using namespace colors;
+
+	const auto status(tokens(msg->status).at(0));
+	const auto code(lex_cast<short>(status));
+	if(code < 200 || code >= 300)
+	{
+		handle_github_response_error();
+		return;
+	}
+
+	auto &chan(bot->chans.get(channame));
+	auto &doc(msg->doc);
+
+	std::stringstream ss;
+	ss << doc;
+	chan << (ss.str().substr(0, 256)) << chan.flush;
+/*
+	chan << doc["id"] << " " << doc["created_at"];
+
+	if(doc.has("repo.name"))
+		chan << BOLD << doc["repo.name"] << OFF;
+
+	if(doc.has("type"))
+		chan << " " << doc["type"];
+
+	if(doc.has("actor.login"))
+		chan << " by " << doc["actor.login"];
+
+	chan << chan.flush;
+*/
+}
+
+
+void client::handle_github_response_error()
+{
+	using namespace colors;
+
+	auto &chan(bot->chans.get(channame));
+	auto &doc(msg->doc);
+
+	if(!doc.has("message"))
+		return;
+
+	chan << doc["message"];
+
+	if(doc.has("documentation_url"))
+		chan << " (" << doc["documentation_url"] << ")";
+
+	chan << chan.flush;
+}
+
+
+void client::handle_github_event()
 {
 	using namespace colors;
 
@@ -459,6 +671,8 @@ void client::handle_github()
 		case hash("pull_request"):   handle_github_pull_request();   break;
 		default:                                                     break;
 	}
+
+	chan << chan.flush;
 }
 
 
@@ -610,17 +824,35 @@ void client::handle_github_pull_request()
 
 void client::respond(const std::string &status)
 {
-	this->out.prepare(out.max_size());
-	std::ostream out(&this->out);
+	std::stringstream out;
 	out << "HTTP/1.1 " << status << "\r\n";
 	out << "Content-Type: application/json\r\n";
 	out << "Content-Length: 0\r\n";
 	out << "\r\n";
 	out << "\r\n";
 
-	const auto bufs(this->out.data());
-	const auto sent(socket.send(bufs));
-	this->out.consume(sent);
+	send(out.str());
+}
+
+
+void client::send(const std::string &data)
+try
+{
+	const boost::asio::const_buffers_1 bufs(data.data(), data.size());
+	if(socket.is_open())
+	{
+		const auto sent(socket.send(bufs));
+		std::cout << socket.remote_endpoint() << " << [" << data << "]" << std::endl;
+	}
+	else if(sslstream.lowest_layer().is_open())
+	{
+		const auto sent(sslstream.write_some(bufs));
+		std::cout << sslstream.lowest_layer().remote_endpoint() << " << [" << data << "]" << std::endl;
+	}
+}
+catch(const std::exception &e)
+{
+	std::cerr << "SEND FAILED: " << e.what() << std::endl;
 }
 
 
@@ -639,9 +871,9 @@ void client::error_to_chan(const std::exception &e)
 
 
 void set_accept();
-void handle_accept(const boost::system::error_code &ec,
+void handle_accept(const error_code &ec,
                    std::shared_ptr<client> c)
-try
+noexcept try
 {
 	using namespace boost::system::errc;
 
@@ -674,6 +906,10 @@ catch(const std::exception &e)
 	auto &chan(bot->chans.get(channame));
 	chan << "acceptor: error: " << e.what() << chan.flush;
 }
+catch(...)
+{
+	std::cerr << "handle_accept: unknown!" << std::endl;
+}
 
 
 void set_accept()
@@ -684,13 +920,44 @@ void set_accept()
 }
 
 
-
 void handle_privmsg(const Msg &msg,
                     Chan &chan,
                     User &user)
 try
 {
+	using namespace fmt::PRIVMSG;
 
+	const auto &text(msg[TEXT]);
+	auto toks(tokens(text));
+	if(toks.empty() || toks.at(0) != bot->sess.get_nick() + ':')
+		return;
+
+	if(user.get_nick() != "jzk")
+		return;
+
+	toks.erase(begin(toks));
+	if(toks.empty())
+	{
+		chan << user << "Please make a request." << chan.flush;
+		return;
+	}
+
+	const auto request(detok(begin(toks), end(toks)));
+
+	std::stringstream out;
+	out << request << " HTTP/1.1\r\n";
+	out << "Host: api.github.com\r\n";
+
+	const auto &opts(bot->opts);
+	if(opts.has("yestifico-auth"))
+		out << "Authorization: Basic " << opts["yestifico-auth"] << "\r\n";
+
+	out << "User-Agent: yestifico/0.0.0\r\n";
+	out << "Accept: */*\r\n";
+	out << "\r\n";
+
+	auto client(std::make_shared<client>());
+	(*client)("api.github.com", out.str());
 }
 catch(const Assertive &e)
 {
@@ -700,6 +967,10 @@ catch(const Assertive &e)
 catch(const std::exception &e)
 {
 	user << chan << "Failed: " << e.what() << user.flush;
+}
+catch(...)
+{
+	std::cerr << "handle_privmsg: unknown!" << std::endl;
 }
 
 
@@ -722,8 +993,11 @@ noexcept
 		opts.has("yestifico-port")? opts.get<uint16_t>("yestifico-port") : 6699
 	};
 
-	const boost::asio::ip::tcp::endpoint ep(boost::asio::ip::tcp::v4(), bind_port);
-	acceptor.reset(new boost::asio::ip::tcp::acceptor(*ios, ep, true));
+	sslctx.reset(new boost::asio::ssl::context(*ios, boost::asio::ssl::context::sslv23));
+	sslctx->set_default_verify_paths();
+
+	const ip::tcp::endpoint ep(ip::tcp::v4(), bind_port);
+	acceptor.reset(new ip::tcp::acceptor(*ios, ep, true));
 	set_accept();
 
 	channame = opts.has("yestifico-chan")? opts["yestifico-chan"] : "#charybdis";
@@ -736,20 +1010,48 @@ extern "C"
 void module_fini(Bot *const bot)
 noexcept
 {
+	error_code ec;
 	std::unique_lock<std::mutex> lock(*bot);
-	if(acceptor->is_open())
-		acceptor->close();
+	if(acceptor)
+		acceptor->close(ec);
 
 	for(auto *const &client : clients)
-		if(client->socket.is_open())
-			client->socket.close();
+	{
+		//client->resolver.cancel();
+		client->socket.close(ec);
+		client->sslstream.lowest_layer().close(ec);
+		client->sslstream.shutdown(ec);
+	}
 
 	cond.wait(lock, []
 	{
+		std::cout << "waiting on " << clients.size() << " clients..." << std::endl;
 		return clients.empty();
 	});
 
 	bot->events.chan_user.clear(handler::Prio::USER);
+
+	std::cout << "yestifico finished" << std::endl;
+}
+
+
+bool errored(const error_code &ec)
+{
+	switch(ec.value())
+	{
+		using namespace boost::system::errc;
+
+		case success:
+			return false;
+
+		case operation_canceled:
+			cond.notify_all();
+			std::atomic_thread_fence(std::memory_order_release);
+			return true;
+
+		default:
+			throw std::runtime_error(ec.message());
+	}
 }
 
 
