@@ -169,6 +169,7 @@ struct client
 	void send(const std::string &data);
 	void respond(const std::string &status = "200 OK");
 
+	void handle_github_commit_comment();
 	void handle_github_pull_request();
 	void handle_github_status();
 	void handle_github_push();
@@ -633,12 +634,13 @@ void client::handle_github_event()
 
 	const auto commit
 	{
-		doc.has("sha")?              doc["sha"]:
-		doc.has("commit.sha")?       doc["commit.sha"]:
-		doc.has("head.commit")?      doc["head.commit"]:
-		doc.has("head_commit.id")?   doc["head_commit.id"]:
-		doc.has("commit")?           doc["commit"]:
-		                             std::string{}
+		doc.has("sha")?               doc["sha"]:
+		doc.has("commit.sha")?        doc["commit.sha"]:
+		doc.has("head.commit")?       doc["head.commit"]:
+		doc.has("head_commit.id")?    doc["head_commit.id"]:
+		doc.has("comment.commit_id")? doc["comment.commit_id"]:
+		doc.has("commit")?            doc["commit"]:
+		                              std::string{}
 	};
 
 	if(!commit.empty())
@@ -669,6 +671,7 @@ void client::handle_github_event()
 		case hash("push"):           handle_github_push();           break;
 		case hash("status"):         handle_github_status();         break;
 		case hash("pull_request"):   handle_github_pull_request();   break;
+		case hash("commit_comment"): handle_github_commit_comment(); break;
 		default:                                                     break;
 	}
 
@@ -827,6 +830,36 @@ void client::handle_github_pull_request()
 
 	if(doc.has("changed_files"))
 		chan << " " << BOLD << doc["changed_files"] << " " << FG::LGRAY << " files" << OFF;
+
+	chan << chan.flush;
+}
+
+
+void client::handle_github_commit_comment()
+{
+	using namespace colors;
+
+	auto &chan(bot->chans.get(channame));
+	auto &doc(msg->doc);
+
+	chan << " " << doc["action"];
+	if(doc.has("comment.path"))
+	{
+		chan << " in " << doc["comment.path"];
+		chan << " +" << doc["comment.line"];
+		chan << "@" << doc["comment.position"];
+	}
+	chan << " (" << doc["comment.html_url"] << ")";
+	chan << chan.flush;
+
+	switch(hash(doc["action"]))
+	{
+		case hash("created"):
+		{
+			chan << "| " << doc["comment.body"];
+			break;
+		}
+	}
 
 	chan << chan.flush;
 }
