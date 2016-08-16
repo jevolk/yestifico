@@ -699,7 +699,7 @@ void client::handle_github_push()
 	const auto num(std::distance(begin(commits), end(commits)));
 	chan << " " << num << " commits";
 	if(num > 15)
-		chan << FG::LGRAY << "(please be patient)" << OFF;
+		chan << BOLD << FG::GRAY << " (please be patient)" << OFF;
 
 	chan << chan.flush; // Flush to start new lines for the commits
 
@@ -718,8 +718,12 @@ void client::handle_github_push()
 		if(commit["committer.email"] != commit["author.email"])
 			chan << " via " << commit["committer.name"];
 
-		const auto cm(split(commit["message"], "\n").first);
+		const auto lines(tokens(commit["message"], "\n"));
+		const auto cm(lines.at(0));
 		chan << " " << UNDER2 << cm << OFF;
+		if(lines.size() > 1)
+			chan << " " << BOLD << FG::GRAY << "(" << (lines.size()-1) << " lines)" << OFF;
+
 		chan << chan.flush;
 	}
 }
