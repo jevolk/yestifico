@@ -752,14 +752,20 @@ void client::handle_github_status()
 				break;
 			}
 
+			if(doc["state"] == "success")
+			{
+				chan.Stream::clear();
+				break;
+			}
+
+			//if(doc["state"] == "success")
+			//	chan << FG::GREEN;
+
 			if(doc["state"] == "error")
 				chan << FG::RED;
 
 			if(doc["state"] == "failure")
 				chan << FG::LRED;
-
-			if(doc["state"] == "success")
-				chan << FG::GREEN;
 
 			chan << doc["description"] << OFF;
 
