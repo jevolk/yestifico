@@ -180,6 +180,8 @@ struct client
 	void send(const std::string &data);
 	void respond(const std::string &status = "200 OK");
 
+	void handle_github_issue_comment();
+	void handle_github_issues();
 	void handle_github_commit_comment();
 	void handle_github_pull_request();
 	void handle_github_status();
@@ -667,22 +669,31 @@ void client::handle_github_event()
 		                              std::string{}
 	};
 
+	const auto number
+	{
+		doc.has("issue.number")?      doc["issue.number"]:
+		                              std::string{}
+	};
+
 	if(!commit.empty())
 	{
 		chan << " ";
 		switch(hash(msg->event))
 		{
-			case hash("push"):           chan << FG::ORANGE;             break;
+			case hash("push"):           chan << BOLD << FG::ORANGE;     break;
 			case hash("pull_request"):   chan << BOLD << FG::MAGENTA;    break;
 		}
 
 		chan << commit.substr(0, 8) << OFF;
+
+		if(doc.has("ref"))
+			chan << " " << doc["ref"];
 	}
 
-	if(doc.has("ref"))
-		chan << " " << doc["ref"];
-
-	chan << " " << msg->event;
+	if(!number.empty())
+		chan << " #" << number;
+	else
+		chan << " " << msg->event;
 
 	if(doc.has_child("pusher"))
 		chan << " by " << doc["pusher.name"];
@@ -696,6 +707,8 @@ void client::handle_github_event()
 		case hash("status"):         handle_github_status();         break;
 		case hash("pull_request"):   handle_github_pull_request();   break;
 		case hash("commit_comment"): handle_github_commit_comment(); break;
+		case hash("issues"):         handle_github_issues();         break;
+		case hash("issue_comment"):  handle_github_issue_comment();  break;
 		default:                                                     break;
 	}
 
@@ -776,17 +789,20 @@ void client::handle_github_status()
 			{
 				// Ignore the pending message by clearing the stream
 				chan.Stream::clear();
-				break;
+				return;
 			}
 
 			if(doc["state"] == "success")
 			{
-				chan.Stream::clear();
-				break;
-			}
+				if(doc["context"] == "continuous-integration/travis-ci/pr" ||
+				   doc["context"] == "continuous-integration/travis-ci/push")
+				{
+					chan.Stream::clear();
+					return;
+				}
 
-			//if(doc["state"] == "success")
-			//	chan << FG::GREEN;
+				chan << FG::GREEN;
+			}
 
 			if(doc["state"] == "error")
 				chan << FG::RED;
@@ -880,7 +896,76 @@ void client::handle_github_commit_comment()
 	{
 		case hash("created"):
 		{
-			chan << "| " << doc["comment.body"];
+			const auto lines(tokens(doc["comment.body"], "\n"));
+			size_t i(0);
+			for(; i < lines.size() && i < 3; ++i)
+				chan << "| " << lines.at(i);
+
+			if(lines.size() > i)
+				chan << "| " << BOLD << FG::GRAY << "(" << (lines.size()-i) << " more lines)" << OFF;
+
+			break;
+		}
+	}
+
+	chan << chan.flush;
+}
+
+
+void client::handle_github_issues()
+{
+	using namespace colors;
+
+	auto &chan(bot->chans.get(channame));
+	auto &doc(msg->doc);
+
+	chan << " " << doc["action"];
+	chan << " (" << doc["issue.url"] << ")";
+	chan << chan.flush;
+
+	switch(hash(doc["action"]))
+	{
+		case hash("opened"):
+		{
+			const auto lines(tokens(doc["issue.body"], "\n"));
+			size_t i(0);
+			for(; i < lines.size() && i < 3; ++i)
+				chan << "| " << lines.at(i);
+
+			if(lines.size() > i)
+				chan << "| " << BOLD << FG::GRAY << "(" << (lines.size()-i) << " more lines)" << OFF;
+
+			break;
+		}
+	}
+
+	chan << chan.flush;
+}
+
+
+void client::handle_github_issue_comment()
+{
+	using namespace colors;
+
+	auto &chan(bot->chans.get(channame));
+	auto &doc(msg->doc);
+
+	chan << " commented";
+	chan << " (" << doc["issue.html_url"] << ")";
+	chan << chan.flush;
+
+	switch(hash(doc["action"]))
+	{
+		case hash("created"):
+		{
+			const auto lines(tokens(doc["comment.body"], "\n"));
+			size_t i(0);
+			for(; i < lines.size() && i < 3; ++i)
+				chan << "| " << lines.at(i);
+
+			if(lines.size() > i)
+				chan << "| " << BOLD << FG::GRAY << "(" << (lines.size()-i) << " more lines)" << OFF;
+
 			break;
 		}
 	}
