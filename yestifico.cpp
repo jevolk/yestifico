@@ -185,6 +185,7 @@ struct client
 	void handle_github_commit_comment();
 	void handle_github_pull_request();
 	void handle_github_status();
+	void handle_github_delete();
 	void handle_github_push();
 	void handle_github_ping();
 
@@ -705,6 +706,7 @@ void client::handle_github_event()
 		case hash("ping"):           handle_github_ping();           break;
 		case hash("push"):           handle_github_push();           break;
 		case hash("status"):         handle_github_status();         break;
+		case hash("delete"):         handle_github_delete();         break;
 		case hash("pull_request"):   handle_github_pull_request();   break;
 		case hash("commit_comment"): handle_github_commit_comment(); break;
 		case hash("issues"):         handle_github_issues();         break;
@@ -732,12 +734,24 @@ void client::handle_github_push()
 	auto &chan(bot->chans.get(channame));
 	auto &doc(msg->doc);
 
+	const auto commits(doc.get_child("commits", Adoc{}));
+	const auto num(std::distance(begin(commits), end(commits)));
+	if(!num)
+	{
+		chan << FG::RED;
+
+		if(doc.has("ref"))
+			chan << " " << doc["ref"];
+
+		chan << " deleted" << OFF << chan.flush;
+		return;
+	}
+
+	chan << " " << num << " commits";
+
 	if(doc["forced"] == "true")
 		chan << " (rebase)";
 
-	const auto commits(doc.get_child("commits", Adoc{}));
-	const auto num(std::distance(begin(commits), end(commits)));
-	chan << " " << num << " commits";
 	if(num > 15)
 		chan << BOLD << FG::GRAY << " (please be patient)" << OFF;
 
@@ -825,6 +839,17 @@ void client::handle_github_status()
 			chan << "context: " << doc["context"] << " unhandled";
 			break;
 	}
+}
+
+
+void client::handle_github_delete()
+{
+	using namespace colors;
+
+	auto &chan(bot->chans.get(channame));
+	const auto &doc(msg->doc);
+
+	chan << " " << "refs/heads/" << doc["ref"] << chan.flush;
 }
 
 
