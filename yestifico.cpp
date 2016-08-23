@@ -75,8 +75,17 @@ void message::parse_head(std::istream &in)
 				event = header.second;
 				continue;
 
+			case hash("hook-source"):
+				src = header.second;
+				continue;
+
 			case hash("travis-repo-slug"):
 				src = "travis";
+				continue;
+
+			case hash("hook-secret"):
+				if(header.second != bot->opts["yestifico-secret"])
+					throw Exception("bad secret key");
 				continue;
 
 			case hash("x-hub-signature"):
@@ -119,7 +128,6 @@ void message::parse_body(std::istream &in, const bool &validate)
 			break;
 		}
 
-		default:
 		case hash("github"):
 		{
 			if(validate && !this->validate(buf.get()))
@@ -128,6 +136,9 @@ void message::parse_body(std::istream &in, const bool &validate)
 			doc = std::string(buf.get());
 			break;
 		}
+
+		default:
+			break;
 	}
 }
 
@@ -181,6 +192,8 @@ struct client
 	void handle_github();
 
 	void handle_travis();
+
+	void handle_appveyor();
 
 	void handle_handshake(const error_code &ec, std::shared_ptr<client>) noexcept;
 	void handle_connect(const error_code &ec, std::shared_ptr<client>) noexcept;
@@ -452,8 +465,9 @@ noexcept try
 	msg->parse_body(in, validate);
 	switch(hash(msg->src))
 	{
-		case hash("github"):    handle_github();   break;
-		case hash("travis"):    handle_travis();   break;
+		case hash("github"):      handle_github();     break;
+		case hash("travis"):      handle_travis();     break;
+		case hash("appveyor"):    handle_appveyor();   break;
 		default:
 			throw Assertive("unknown webhook source");
 	}
@@ -466,6 +480,16 @@ catch(const std::exception &e)
 catch(...)
 {
 	std::cerr << "handle_body: unknown exception!" << std::endl;
+}
+
+
+void client::handle_appveyor()
+{
+	using namespace colors;
+
+	auto &chan(bot->chans.get(channame));
+	auto &doc(msg->doc);
+	//std::cout << doc << std::endl;
 }
 
 
