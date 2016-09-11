@@ -946,6 +946,7 @@ void client::handle_github_issues()
 
 	chan << " " << doc["action"];
 	chan << " (" << doc["issue.html_url"] << ")";
+	chan << " " << UNDER2 << doc["issue.title"] << OFF;
 	chan << chan.flush;
 
 	switch(hash(doc["action"]))
