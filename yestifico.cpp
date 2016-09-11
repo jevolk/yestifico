@@ -686,9 +686,6 @@ void client::handle_github_event()
 		}
 
 		chan << commit.substr(0, 8) << OFF;
-
-		if(doc.has("ref"))
-			chan << " " << doc["ref"];
 	}
 
 	if(!number.empty())
@@ -746,6 +743,9 @@ void client::handle_github_push()
 		chan << " deleted" << OFF << chan.flush;
 		return;
 	}
+
+	if(doc.has("ref"))
+		chan << " " << doc["ref"];
 
 	chan << " " << num << " commits";
 
