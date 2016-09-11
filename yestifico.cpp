@@ -975,22 +975,29 @@ void client::handle_github_issue_comment()
 	auto &chan(bot->chans.get(channame));
 	auto &doc(msg->doc);
 
-	chan << " commented";
 	chan << " (" << doc["issue.html_url"] << ")";
+	chan << " " << UNDER2 << doc["issue.title"] << OFF;
 	chan << chan.flush;
 
 	switch(hash(doc["action"]))
 	{
 		case hash("created"):
 		{
-			const auto lines(tokens(doc["comment.body"], "\n"));
+			const auto lines(tokens(doc["comment.body"], "\r\n"));
 			size_t i(0);
-			for(; i < lines.size() && i < 3; ++i)
-				chan << "| " << lines.at(i);
+			for(; i < lines.size() && i < 2; ++i)
+				chan << "| " << lines.at(i) << chan.flush;
 
 			if(lines.size() > i)
 				chan << "| " << BOLD << FG::GRAY << "(" << (lines.size()-i) << " more lines)" << OFF;
 
+			break;
+		}
+
+		case hash("edited"):
+		{
+			const auto lines(tokens(doc["comment.body"], "\r\n"));
+			chan << BOLD << FG::GRAY << "| (edited " << lines.size() << " line comment)" << OFF;
 			break;
 		}
 	}
