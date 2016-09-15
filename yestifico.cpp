@@ -1244,7 +1244,7 @@ std::string getline_crlf(std::istream &in)
 {
 	std::string ret;
 	std::getline(in, ret);
-	if(ret.back() == '\r')
+	if(!ret.empty() && ret.back() == '\r')
 		ret.pop_back();
 
 	return ret;
