@@ -673,6 +673,7 @@ void client::handle_github_event()
 	const auto number
 	{
 		doc.has("issue.number")?      doc["issue.number"]:
+		doc.has("number")?            doc["number"]:
 		                              std::string{}
 	};
 
@@ -689,7 +690,7 @@ void client::handle_github_event()
 	}
 
 	if(!number.empty())
-		chan << " #" << number;
+		chan << " " << BOLD << "#" << number << OFF;
 	else
 		chan << " " << msg->event;
 
@@ -861,10 +862,11 @@ void client::handle_github_pull_request()
 	auto &doc(msg->doc);
 
 	chan << " " << doc["action"];
-	chan << " " << BOLD << "#" << doc["number"] << OFF;
+	chan << " (" << doc["pull_request.html_url"] << ")";
 	chan << " " << UNDER2 << doc["pull_request.title"] << OFF;
 
-	chan << " ";
+	//chan << chan.flush;
+	//chan << "| ";
 	switch(hash(doc["mergeable"]))
 	{
 		default:
