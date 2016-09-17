@@ -180,6 +180,7 @@ struct client
 	void send(const std::string &data);
 	void respond(const std::string &status = "200 OK");
 
+	void handle_github_create();
 	void handle_github_issue_comment();
 	void handle_github_issues();
 	void handle_github_commit_comment();
@@ -709,6 +710,7 @@ void client::handle_github_event()
 		case hash("commit_comment"): handle_github_commit_comment(); break;
 		case hash("issues"):         handle_github_issues();         break;
 		case hash("issue_comment"):  handle_github_issue_comment();  break;
+		case hash("create"):         handle_github_create();         break;
 		default:                                                     break;
 	}
 
@@ -1006,6 +1008,35 @@ void client::handle_github_issue_comment()
 	}
 
 	chan << chan.flush;
+}
+
+
+void client::handle_github_create()
+{
+	using namespace colors;
+
+	auto &chan(bot->chans.get(channame));
+	auto &doc(msg->doc);
+
+	chan << " " << doc["ref_type"] << OFF;
+
+	switch(hash(doc["ref_type"]))
+	{
+		case hash("branch"):
+		{
+			chan << " " << BOLD << doc["ref"] << OFF;
+			chan << " from " << BOLD << doc["master_branch"] << OFF;
+			chan << chan.flush;
+
+			if(doc.has("description"))
+			{
+				chan << "| " << doc["description"];
+				chan << chan.flush;
+			}
+
+			break;
+		}
+	}
 }
 
 
