@@ -949,6 +949,14 @@ void client::handle_github_issues()
 	auto &doc(msg->doc);
 
 	chan << " " << doc["action"];
+	switch(hash(doc["action"]))
+	{
+		case hash("assigned"):
+		case hash("unassigned"):
+			chan << " " << doc["assignee.login"];
+			break;
+	}
+
 	chan << " (" << doc["issue.html_url"] << ")";
 	chan << " " << UNDER2 << doc["issue.title"] << OFF;
 	chan << chan.flush;
@@ -1079,12 +1087,13 @@ void client::error_to_chan(const std::exception &e)
 	if(!bot->chans.has(channame))
 		return;
 
-	auto &chan(bot->chans.get(channame));
+	//auto &chan(bot->chans.get(channame));
+	auto &chan(std::cerr);
 
 	if(socket.is_open())
 		chan << "client[" << socket.remote_endpoint() << "] ";
 
-	chan << "error: " << e.what() << chan.flush;
+	chan << "error: " << e.what() << std::endl;
 }
 
 
